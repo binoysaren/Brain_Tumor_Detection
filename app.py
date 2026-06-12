@@ -1,9 +1,9 @@
 from flask import Flask, render_template, request
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import image
 import numpy as np
 import os
 import tensorflow as tf
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing import image
 
 # =========================
 # Flask App
@@ -11,16 +11,18 @@ import tensorflow as tf
 app = Flask(__name__)
 
 # =========================
-# TensorFlow Safety Fix
+# TensorFlow Safe Mode
 # =========================
-tf.keras.backend.clear_session()
+tf.get_logger().setLevel('ERROR')
 
 # =========================
-# Load Model Safely
+# Model Loading
 # =========================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "brain_tumor.keras")
+
 try:
-    model_path = os.path.join(os.path.dirname(__file__), "brain_tumor.keras")
-    model = load_model(model_path, compile=False)
+    model = load_model(MODEL_PATH, compile=False)
     print("✅ Model loaded successfully")
 except Exception as e:
     print("❌ Model loading failed:", e)
@@ -34,7 +36,7 @@ CLASSES = ["glioma", "meningioma", "notumor", "pituitary"]
 # =========================
 # Upload Folder
 # =========================
-UPLOAD_FOLDER = "static/uploads"
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "static/uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
@@ -44,25 +46,23 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 def predict_tumor(img_path):
 
     if model is None:
-        raise Exception("Model not loaded")
+        raise Exception("Model is not loaded")
 
     img = image.load_img(img_path, target_size=(128, 128))
     img = image.img_to_array(img)
     img = img / 255.0
     img = np.expand_dims(img, axis=0)
 
-    prediction = model.predict(img)
+    preds = model.predict(img)
 
-    print("Raw prediction:", prediction)
+    probs = preds[0]
+    class_index = int(np.argmax(probs))
+    confidence = float(probs[class_index] * 100)
 
-    probs = prediction[0]
-    predicted_class = int(np.argmax(probs))
-    confidence = float(probs[predicted_class] * 100)
-
-    if predicted_class < 0 or predicted_class >= len(CLASSES):
+    if class_index < 0 or class_index >= len(CLASSES):
         return "Unknown", confidence
 
-    return CLASSES[predicted_class], confidence
+    return CLASSES[class_index], confidence
 
 # =========================
 # Routes
@@ -77,24 +77,25 @@ def home():
 
     if request.method == "POST":
 
-        if model is None:
-            error = "Model not loaded properly"
-            return render_template("index.html", error=error)
-
         file = request.files.get("file")
 
-        if file and file.filename != "":
+        if not file or file.filename == "":
+            error = "No file selected"
+            return render_template("index.html", error=error)
 
-            filepath = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
-            file.save(filepath)
+        filepath = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
+        file.save(filepath)
 
-            try:
-                prediction, confidence = predict_tumor(filepath)
-                image_name = file.filename
+        try:
+            if model is None:
+                raise Exception("Model failed to load")
 
-            except Exception as e:
-                error = str(e)
-                print("Prediction error:", e)
+            prediction, confidence = predict_tumor(filepath)
+            image_name = file.filename
+
+        except Exception as e:
+            print("Prediction error:", e)
+            error = str(e)
 
     return render_template(
         "index.html",
@@ -105,7 +106,7 @@ def home():
     )
 
 # =========================
-# Run App (Production Ready)
+# Run (Render Ready)
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
