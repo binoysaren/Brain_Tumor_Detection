@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template, request
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
@@ -8,7 +7,7 @@ import os
 app = Flask(__name__)
 
 # =========================
-# Load Model Safely
+# Load Model
 # =========================
 try:
     model = load_model("brain_tumor.keras", compile=False)
@@ -18,11 +17,9 @@ except Exception as e:
     model = None
 
 # =========================
-# Class Labels (must match training)
+# Class Labels (must match training order)
 # =========================
 CLASSES = ["glioma", "meningioma", "notumor", "pituitary"]
-# CLASSES = ["notumor", "glioma", "meningioma", "pituitary"]
-# CLASSES = ["glioma", "pituitary", "notumor", "meningioma"]
 
 # =========================
 # Upload Folder
@@ -33,7 +30,7 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 
 # =========================
-# Prediction Function
+# Prediction Function (FIXED FOR TF 2.21 + KERAS 3)
 # =========================
 def predict_tumor(img_path):
     img = image.load_img(img_path, target_size=(128, 128))
@@ -41,7 +38,8 @@ def predict_tumor(img_path):
     img = img / 255.0
     img = np.expand_dims(img, axis=0)
 
-    prediction = model(img, training=False).numpy()  # FIXED FOR TF 2.21 + Keras 3
+    # IMPORTANT FIX (Render safe)
+    prediction = model(img, training=False).numpy()
 
     print("Raw prediction:", prediction)
 
@@ -86,6 +84,9 @@ def home():
                 error = str(e)
                 print("Prediction error:", e)
 
+        else:
+            error = "No file selected"
+
     return render_template(
         "index.html",
         prediction=prediction,
@@ -96,7 +97,8 @@ def home():
 
 
 # =========================
-# Run App
+# Run App (Render compatible)
 # =========================
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port, debug=False)
