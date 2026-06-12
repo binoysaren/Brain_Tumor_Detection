@@ -3,89 +3,75 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
 import numpy as np
 import os
+import traceback
 
 app = Flask(__name__)
 
-# =========================
-# Load Model
-# =========================
-try:
-    model = load_model("brain_tumor.keras", compile=False)
-    print("✅ Model loaded successfully")
-except Exception as e:
-    print("❌ Model loading failed:", e)
-    model = None
-
-# =========================
-# Class Labels (must match training order)
-# =========================
-CLASSES = ["glioma", "meningioma", "notumor", "pituitary"]
-
-# =========================
-# Upload Folder
-# =========================
 UPLOAD_FOLDER = "static/uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
+# Load model safely
+try:
+    model = load_model("brain_tumor.keras", compile=False)
+    print("Model loaded successfully")
+except Exception as e:
+    print("Model loading failed:", e)
+    model = None
 
-# =========================
-# Prediction Function (FIXED FOR TF 2.21 + KERAS 3)
-# =========================
+CLASSES = ["glioma", "meningioma", "notumor", "pituitary"]
+
 def predict_tumor(img_path):
-    img = image.load_img(img_path, target_size=(128, 128))
-    img = image.img_to_array(img)
-    img = img / 255.0
-    img = np.expand_dims(img, axis=0)
+    try:
+        img = image.load_img(img_path, target_size=(128, 128))
+        img = image.img_to_array(img)
+        img = img / 255.0
+        img = np.expand_dims(img, axis=0)
 
-    # IMPORTANT FIX (Render safe)
-    prediction = model(img, training=False).numpy()
+        preds = model.predict(img)
+        class_index = np.argmax(preds[0])
+        confidence = float(np.max(preds[0]) * 100)
 
-    print("Raw prediction:", prediction)
+        if class_index >= len(CLASSES):
+            return "Unknown", confidence
 
-    predicted_class = int(np.argmax(prediction[0]))
-    confidence = float(np.max(prediction[0]) * 100)
+        return CLASSES[class_index], confidence
 
-    if predicted_class < 0 or predicted_class >= len(CLASSES):
-        return "Unknown", confidence
+    except Exception as e:
+        print("Prediction error:", e)
+        traceback.print_exc()
+        return "Error", 0.0
 
-    return CLASSES[predicted_class], confidence
 
-
-# =========================
-# Routes
-# =========================
 @app.route("/", methods=["GET", "POST"])
 def home():
-
     prediction = None
     confidence = None
     image_name = None
     error = None
 
     if request.method == "POST":
+        try:
+            file = request.files.get("file")
 
-        if model is None:
-            error = "Model not loaded properly"
-            return render_template("index.html", error=error)
-
-        file = request.files.get("file")
-
-        if file and file.filename != "":
+            if not file or file.filename == "":
+                error = "No file selected"
+                return render_template("index.html", error=error)
 
             filepath = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
             file.save(filepath)
 
-            try:
-                prediction, confidence = predict_tumor(filepath)
-                image_name = file.filename
+            if model is None:
+                error = "Model failed to load"
+                return render_template("index.html", error=error)
 
-            except Exception as e:
-                error = str(e)
-                print("Prediction error:", e)
+            prediction, confidence = predict_tumor(filepath)
+            image_name = file.filename
 
-        else:
-            error = "No file selected"
+        except Exception as e:
+            error = str(e)
+            print("ERROR:", e)
+            traceback.print_exc()
 
     return render_template(
         "index.html",
@@ -96,9 +82,6 @@ def home():
     )
 
 
-# =========================
-# Run App (Render compatible)
-# =========================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
