@@ -36,19 +36,18 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 # Prediction Function
 # =========================
 def predict_tumor(img_path):
-    img = image.load_img(img_path, target_size=(128, 128))  # FIXED SIZE
+    img = image.load_img(img_path, target_size=(128, 128))
     img = image.img_to_array(img)
     img = img / 255.0
     img = np.expand_dims(img, axis=0)
 
-    prediction = model.predict(img)
+    prediction = model(img, training=False).numpy()  # FIXED FOR TF 2.21 + Keras 3
 
     print("Raw prediction:", prediction)
 
     predicted_class = int(np.argmax(prediction[0]))
     confidence = float(np.max(prediction[0]) * 100)
 
-    # Safety check to avoid list index error
     if predicted_class < 0 or predicted_class >= len(CLASSES):
         return "Unknown", confidence
 
